@@ -5,3 +5,6 @@ Ruft is an attempt to implement [Raft](https://en.wikipedia.org/wiki/Raft_(algor
 ## Tutorial
 
 [Used tutorial](https://eli.thegreenplace.net/2020/implementing-raft-part-0-introduction/).
+
+## Blockers
+* [ ] think about implementing Feature trait
