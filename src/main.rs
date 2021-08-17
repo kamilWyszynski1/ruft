@@ -1,16 +1,17 @@
 extern crate timer;
 
 use crate::CmState::Follower;
-use std::time::{SystemTime, Duration};
 use rand::Rng;
-use std::fmt::{Display, Formatter};
-use std::sync::Arc;
-use tokio::sync::{Mutex, MutexGuard};
 use std::borrow::Borrow;
 use std::borrow::Cow::Borrowed;
-use tokio::time::sleep;
-use tokio::runtime::{Builder, Handle};
+use std::fmt::{Display, Formatter};
 use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime};
+use tokio::runtime::{Builder, Handle};
+use tokio::sync::{Mutex, MutexGuard};
+use tokio::time::sleep;
+use tokio::{task, time}; // 1.3.0
 
 struct Server {}
 
@@ -51,16 +52,15 @@ impl State {
 }
 
 // ConsensusModule implements single node of Raft consensus.
-#[derive(Copy, Clone)]
 struct ConsensusModule {
     id: i32,            // server ID of this CM.
     server: Server,     // server that contains this CM, used to issue RPC calls to peers.
     peer_ids: Vec<i32>, // vec of peers' ids.
     // State persistent Raft state on all servers.
-    current_term: Arc<Mutex<i32>>,
+    current_term: i32,
     voted_for: i32,
     // Volatile Raft state on all servers
-    state: Arc<Mutex<CmState>>,
+    state: CmState,
     election_reset_event: SystemTime,
     done: bool,
 }
@@ -73,21 +73,25 @@ impl ConsensusModule {
             id,
             peer_ids,
             server,
-            current_term: Arc::new(Mutex::new(0)),
+            current_term: 0,
             voted_for: 0,
-            state: Arc::new(Mutex::new(Follower)),
+            state: Follower,
             election_reset_event: SystemTime::now(),
             done: false,
         }
+    }
+
+    async fn test(self: Rc<ConsensusModule>) {
+        task::spawn( async move {
+            println!("{}", self.done)
+        });
     }
 
     // run runs election timer.
     async fn run(&mut self) {
         let timeout_duration = self.election_timeout();
 
-        let term_guard = self.current_term.lock().await;
-        let term_started = term_guard.clone();
-        drop(term_guard);
+        let term_started = self.current_term.clone();
 
         println!(
             "election time started {:?}, term: {}",
@@ -100,12 +104,8 @@ impl ConsensusModule {
         // In a follower, this typically keeps running in the background for the
         // duration of the CM's lifetime.
 
-        use tokio::{task, time}; // 1.3.0
-
-        let current_term = Arc::clone(&self.current_term);
-        let state = Arc::clone(&self.state);
-        let election_reset_event = self.election_reset_event.clone();
-
+        let sm = Arc::new(Mutex::new(self));
+        let s_guard = Arc::clone(&sm);
         let forever = task::spawn(async move {
             let mut interval = time::interval(Duration::from_millis(10));
 
@@ -113,30 +113,24 @@ impl ConsensusModule {
                 interval.tick().await;
                 println!("tick");
 
-                let state_guard = state.lock().await;
-                let state = state_guard.clone();
-
-                if state != CmState::Candidate && state != CmState::Follower {
-                    println!("in election timer state={}, bailing out", state);
+                let s = s_guard.lock().await;
+                if s.state != CmState::Candidate && s.state != CmState::Follower {
+                    println!("in election timer state={}, bailing out", s.state);
                     return;
                 }
 
-                let term_guard = current_term.lock().await;
-                let current_term = term_guard.clone();
-                drop(term_guard);
-
-                if term_started != current_term {
+                if term_started != s.current_term {
                     println!(
                         "in election timer term changed from {} to {}, bailing out",
-                        term_started, current_term
+                        term_started, s.current_term
                     );
-                    return
+                    return;
                 }
 
                 // Start an election if we haven't heard from a leader or haven't voted for
                 // someone for the duration of the timeout.
-                if election_reset_event.elapsed().unwrap() > timeout_duration {
-                    return
+                if s.election_reset_event.elapsed().unwrap() > timeout_duration {
+                    return;
                 }
             }
         });
@@ -149,7 +143,7 @@ impl ConsensusModule {
 
     fn election_timeout(&self) -> Duration {
         let mut rng = rand::thread_rng();
-        let dur = rng.gen_range(0..CM_MAX_DURATION) ;
+        let dur = rng.gen_range(0..CM_MAX_DURATION);
         Duration::new(dur, 0)
     }
 }
@@ -196,8 +190,8 @@ async fn main() {
     // }
     // println!("Count hit 50.");
 
-    let mut cm: ConsensusModule = ConsensusModule::new(0, vec![0], Server{});
-    cm.run().await;
+    let mut cm: ConsensusModule = ConsensusModule::new(0, vec![0], Server {});
+    Rc::new(cm).test().await;
     println!("finish");
     println!("{}", cm.done);
 }
