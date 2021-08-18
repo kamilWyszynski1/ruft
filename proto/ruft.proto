@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+option java_package = "io.grpc.examples.helloworld";
+option java_outer_classname = "HelloWorldProto";
+
+package ruftp;
+
+// The greeting service definition.
+service RPCProxy {
+  // Sends a greeting
+  rpc RequestVote (RequestVoteArgs) returns (RequestVoteReply) {}
+}
+
+// The request message containing the user's name.
+message RequestVoteArgs {
+  int32 term = 1;
+  int32 candidate_id = 2;
+}
+
+// The response message containing the greetings
+message RequestVoteReply {
+  int32 term = 1;
+  bool vote_granted = 2;
+}
