@@ -20,3 +20,7 @@ tonic-build = "0.5.2"
 [[bin]]
 name = "ruft-client"
 path = "src/client/ruft_client.rs"
+
+[[bin]]
+name = "ruft-server"
+path = "src/server/server.rs"

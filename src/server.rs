@@ -8,6 +8,7 @@ use tonic::{transport::Server, Request, Response, Status};
 use ruftp::rpc_proxy_client::RpcProxyClient;
 use ruftp::rpc_proxy_server::{RpcProxy, RpcProxyServer};
 use ruftp::{RequestVoteArgs, RequestVoteReply};
+use std::cell::RefCell;
 use std::fmt::Error;
 use tonic::transport::Channel;
 
@@ -21,7 +22,7 @@ pub struct Srv {
     server_id: i32,
     peer_ids: Vec<i32>,
     cm: raft::ConsensusModule,
-    peer_clients: HashMap<i32, Option<RpcProxyClient<Channel>>>,
+    peer_clients: HashMap<i32, RefCell<RpcProxyClient<Channel>>>,
 }
 
 impl Srv {
@@ -34,15 +35,16 @@ impl Srv {
         }
     }
 
-    pub async fn serve(&mut self) {
+    pub async fn serve(&mut self) -> Result<(), tonic::transport::Error> {
         // Create a new RPC server and register a RPCProxy that forwards all methods
         // to n.cm
-        let addr = "[::1]:50051".parse().unwrap();
+        let addr = "[::1]:50052".parse().unwrap();
         let proxy = MyRPCProxy::default();
         Server::builder()
             .add_service(RpcProxyServer::new(proxy))
-            .serve(addr)
-            .await;
+            .serve(addr);
+        Ok(())
+
     }
 
     pub async fn connect_to_peer(
@@ -50,10 +52,10 @@ impl Srv {
         peer_id: i32,
         addr: String,
     ) -> Result<(), tonic::transport::Error> {
+        println!("connecting");
         if self.peer_clients.get(&peer_id).is_none() {
             let cli = RpcProxyClient::connect(addr).await?;
-
-            self.peer_clients.insert(peer_id, Some(cli));
+            self.peer_clients.insert(peer_id, RefCell::new(cli));
         }
         Ok(())
     }
@@ -63,9 +65,14 @@ impl Srv {
         self.peer_clients.remove(&peer_id);
     }
 
-    pub async fn call(&mut self, peer_id: i32) -> Result<(), Error> {
-        self.peer_clients.get(&peer_id).unwrap().as_ref().unwrap();
-        Ok(())
+    pub async fn call(
+        &mut self,
+        peer_id: i32,
+        req: RequestVoteArgs,
+    ) -> Result<RequestVoteReply, Error> {
+        println!("calling");
+        let mut res = self.peer_clients.get(&peer_id).unwrap().borrow_mut();
+        Ok(res.request_vote(req).await.unwrap().into_inner())
     }
 }
 #[derive(Default)]
