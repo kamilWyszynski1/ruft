@@ -1,4 +1,4 @@
-use crate::raft;
+use crate::raft::ConsensusModule;
 use crate::ruftp;
 
 use std::collections::HashMap;
@@ -10,7 +10,13 @@ use ruftp::rpc_proxy_server::{RpcProxy, RpcProxyServer};
 use ruftp::{RequestVoteArgs, RequestVoteReply};
 use std::cell::RefCell;
 use std::fmt::Error;
+use std::ops::Deref;
+use std::rc::Rc;
 use tonic::transport::Channel;
+
+pub trait RPCServer {
+    fn call_vote(&mut self, peer_id: &i32, req: RequestVoteArgs) -> Result<RequestVoteReply, Error>;
+}
 
 // Server wraps a raft.ConsensusModule along with a rpc.Server that exposes its
 // methods as RPC endpoints. It also manages the peers of the Raft server. The
@@ -21,7 +27,6 @@ use tonic::transport::Channel;
 pub struct Srv {
     server_id: i32,
     peer_ids: Vec<i32>,
-    cm: raft::ConsensusModule,
     peer_clients: HashMap<i32, RefCell<RpcProxyClient<Channel>>>,
 }
 
@@ -30,21 +35,26 @@ impl Srv {
         Srv {
             server_id,
             peer_ids,
-            cm: raft::ConsensusModule::default(),
             peer_clients: Default::default(),
         }
     }
 
-    pub async fn serve(&mut self) -> Result<(), tonic::transport::Error> {
+    pub fn default() -> Srv {
+        Srv {
+            server_id: 0,
+            peer_ids: vec![],
+            peer_clients: Default::default(),
+        }
+    }
+
+    pub async fn serve(&mut self, proxy: MyRPCProxy) -> Result<(), tonic::transport::Error> {
         // Create a new RPC server and register a RPCProxy that forwards all methods
         // to n.cm
         let addr = "[::1]:50052".parse().unwrap();
-        let proxy = MyRPCProxy::default();
         Server::builder()
             .add_service(RpcProxyServer::new(proxy))
             .serve(addr);
         Ok(())
-
     }
 
     pub async fn connect_to_peer(
@@ -63,6 +73,10 @@ impl Srv {
     fn disconnect_peer(&mut self, peer_id: i32) {
         // TODO: check if remove drop connection
         self.peer_clients.remove(&peer_id);
+    }
+
+    pub fn get_peers(&self) -> Vec<i32> {
+        self.peer_clients.keys().cloned().collect()
     }
 
     pub async fn call(
