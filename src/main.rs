@@ -17,8 +17,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut srv = server::Srv::new(0, vec![]);
     srv.serve().await?;
     srv.connect_to_peer(1, "http://[::1]:50051".to_string()).await?;
-    srv.call(1, RequestVoteArgs{ term: 1, candidate_id: 1 }).await?;
+    srv.connect_to_peer(2, "http://[::1]:50052".to_string()).await?;
+    srv.connect_to_peer(3, "http://[::1]:50053".to_string()).await?;
 
-    sleep(std::time::Duration::new(10, 0)).await;
+    srv.call(1, RequestVoteArgs{ term: 1, candidate_id: 1 }).await?;
+    srv.call(2, RequestVoteArgs{ term: 2, candidate_id: 1 }).await?;
+    srv.call(3, RequestVoteArgs{ term: 3, candidate_id: 1 }).await?;
     Ok(())
 }

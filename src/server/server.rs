@@ -4,9 +4,11 @@ pub mod ruftp {
 use ruftp::rpc_proxy_client::RpcProxyClient;
 use ruftp::rpc_proxy_server::{RpcProxy, RpcProxyServer};
 use ruftp::{RequestVoteArgs, RequestVoteReply};
+use std::env;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use tonic::{ Request, Response, Status};
-use tonic::transport::Server;
+use std::thread;
+use tonic::transport::{Error, Server};
+use tonic::{Request, Response, Status};
 
 #[derive(Default)]
 pub struct MyRPCProxy {}
@@ -27,11 +29,33 @@ impl RpcProxy for MyRPCProxy {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let addr = "[::1]:50051".parse().unwrap();
+    let args: Vec<String> = env::args().collect();
+
+    let num_o = args.get(1);
+    let mut num = 1;
+    if num_o.is_some() {
+        num = num_o.unwrap().parse::<i32>()?;
+    }
+    let mut handles = vec![];
+
+    for id in 0..num {
+        let addr = format!("[::1]:5005{}", id + 1).parse().unwrap();
+        println!("started {} server on: {}", id + 1, addr);
+
+        handles.push(tokio::spawn(start_server(addr)));
+    }
+    futures::future::join_all(handles).await;
+    loop {
+
+    }
+    Ok(())
+}
+
+async fn start_server(addr: SocketAddr) -> Result<(), Error> {
     let proxy = MyRPCProxy::default();
     Server::builder()
         .add_service(RpcProxyServer::new(proxy))
         .serve(addr)
-        .await;
+        .await?;
     Ok(())
 }
